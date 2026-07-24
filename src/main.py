@@ -1,151 +1,113 @@
 from machine import Pin, ADC
-import time
+import utime
 
-# ==========================
-# Configurações
-# ==========================
-
-LDR_PIN = 34
-BUTTON_PIN = 4
-
-LIGHT_THRESHOLD = 500      # Lux considerado iluminado
-DARK_THRESHOLD = 100       # Lux considerado bloqueado
-
-MICROSTOP_TIME = 5000      # ms
-DEBOUNCE_TIME = 50         # ms
-
-# ==========================
-# Hardware
-# ==========================
+# ---------------------------------------------------------------------------
+# Configuracao de hardware
+# ---------------------------------------------------------------------------
+LDR_PIN = 34   # GPIO34 (ADC1_CH6) - conectado ao pino AO do sensor ldr1
+BTN_PIN = 4    # GPIO4 - conectado ao botao btn1
 
 ldr = ADC(Pin(LDR_PIN))
-ldr.atten(ADC.ATTN_11DB)
+ldr.atten(ADC.ATTN_11DB)   # Permite ler a faixa completa 0 - 3.3V (0 - 4095)
 
-button = Pin(BUTTON_PIN, Pin.IN, Pin.PULL_UP)
+btn = Pin(BTN_PIN, Pin.IN, Pin.PULL_UP)  # nivel baixo = botao pressionado
 
-# ==========================
-# Variáveis
-# ==========================
+# ---------------------------------------------------------------------------
+# Parametros do sistema
+# ---------------------------------------------------------------------------
+# Limiares em "contagem bruta do ADC" (0-4095), calculados a partir dos
+# parametros padrao do componente wokwi-photoresistor-sensor (rl10=50k ohm,
+# gamma=0.7, resistor fixo de 10k em serie com o LDR, AO entre os dois):
+#   R(lux)   = rl10 * (lux/10) ^ (-gamma)
+#   Vout     = VCC * Rfixo / (R(lux) + Rfixo)
+# Com VCC=3.3V isso da aproximadamente:
+#   lux=800 (linha livre)   -> ADC ~ 3300
+#   lux=50  (peca passando) -> ADC ~ 1560
+# Os limiares abaixo ficam entre esses dois valores, com folga (histerese)
+# para evitar oscilacao por ruido perto da transicao.
+LUX_ALTO = 2500   # acima disso = linha livre (> 500 lux no enunciado)
+LUX_BAIXO = 2000  # abaixo disso = peca bloqueando o sensor (< 100 lux no enunciado)
 
-piece_count = 0
+DEBOUNCE_MS = 50
+MICRO_PARADA_MS = 5000
 
-beam_blocked = False
+# ---------------------------------------------------------------------------
+# Estado do sistema
+# ---------------------------------------------------------------------------
+contador_pecas = 0
+linha_bloqueada = False
+inicio_bloqueio = 0
+alerta_emitido = False
 
-block_start = 0
-microstop_reported = False
-
-last_button_state = 1
-last_button_change = time.ticks_ms()
-
-print("Contador de Producao Inicializado")
-
-
-# ==========================
-# Funções
-# ==========================
-
-def read_lux():
-    """
-    Converte leitura ADC para uma escala aproximada de lux.
-    """
-    raw = ldr.read()
-
-    # ADC ESP32 = 0..4095
-    lux = int((raw / 4095) * 1000)
-
-    return lux
-
-
-def detect_piece(lux):
-    global beam_blocked
-    global piece_count
-    global block_start
-    global microstop_reported
-
-    # Peça entrou
-    if not beam_blocked and lux < DARK_THRESHOLD:
-        beam_blocked = True
-        block_start = time.ticks_ms()
-        microstop_reported = False
-
-    # Peça saiu
-    elif beam_blocked and lux > LIGHT_THRESHOLD:
-        beam_blocked = False
-
-        piece_count += 1
-
-        print(f"Peca detectada! Total: {piece_count}")
+btn_estado_anterior = 1
+btn_ultima_mudanca = utime.ticks_ms()
+btn_estavel = 1
 
 
-def detect_microstop():
-    global microstop_reported
+def ler_botao():
+    """Debounce nao-bloqueante. Retorna o novo estado estavel (0 ou 1)
+    somente no instante em que ele muda, ou None caso contrario."""
+    global btn_estado_anterior, btn_ultima_mudanca, btn_estavel
 
-    if beam_blocked and not microstop_reported:
+    leitura = btn.value()
+    agora = utime.ticks_ms()
 
-        elapsed = time.ticks_diff(
-            time.ticks_ms(),
-            block_start
-        )
+    if leitura != btn_estado_anterior:
+        btn_ultima_mudanca = agora
+        btn_estado_anterior = leitura
 
-        if elapsed >= MICROSTOP_TIME:
-            microstop_reported = True
-            print("Alerta: Micro-parada detectada!")
+    if utime.ticks_diff(agora, btn_ultima_mudanca) > DEBOUNCE_MS:
+        if leitura != btn_estavel:
+            btn_estavel = leitura
+            return btn_estavel
+
+    return None
 
 
-def reset_shift():
-    global piece_count
-    global beam_blocked
-    global microstop_reported
-    global block_start
-
-    piece_count = 0
-    beam_blocked = False
-    microstop_reported = False
-    block_start = 0
-
+def resetar_turno():
+    global contador_pecas, linha_bloqueada, alerta_emitido
+    contador_pecas = 0
+    linha_bloqueada = False
+    alerta_emitido = False
     print("Turno resetado com sucesso. Contadores zerados.")
 
 
-def handle_button():
-    global last_button_state
-    global last_button_change
+def main():
+    global contador_pecas, linha_bloqueada, inicio_bloqueio, alerta_emitido
 
-    current = button.value()
+    print("Contador de Producao Inicializado")
 
-    if current != last_button_state:
-        last_button_change = time.ticks_ms()
-        last_button_state = current
+    while True:
+        valor_ldr = ldr.read()
+        agora = utime.ticks_ms()
 
-    else:
+        # --- Deteccao de peca: incrementa somente na borda de subida ---
+        # (linha livre -> bloqueada -> livre = uma peca completa passou)
+        if not linha_bloqueada and valor_ldr < LUX_BAIXO:
+            linha_bloqueada = True
+            inicio_bloqueio = agora
+            alerta_emitido = False
 
-        elapsed = time.ticks_diff(
-            time.ticks_ms(),
-            last_button_change
-        )
+        elif linha_bloqueada and valor_ldr > LUX_ALTO:
+            linha_bloqueada = False
+            contador_pecas += 1
+            print("Peca detectada! Total: {}".format(contador_pecas))
 
-        if elapsed > DEBOUNCE_TIME:
+        # --- Deteccao de micro-parada (temporizador nao-bloqueante) ---
+        if linha_bloqueada and not alerta_emitido:
+            if utime.ticks_diff(agora, inicio_bloqueio) > MICRO_PARADA_MS:
+                print("Alerta: Micro-parada detectada!")
+                alerta_emitido = True
 
-            # Pull-up: pressionado = 0
-            if current == 0:
+        # --- Botao de reset (com debounce) ---
+        # Dispara na borda de subida (quando SOLTA o botao), seguindo o
+        # mesmo padrao usado na contagem de pecas: a acao so e considerada
+        # completa quando o evento termina, nao quando comeca.
+        novo_estado = ler_botao()
+        if novo_estado == 1:
+            resetar_turno()
 
-                reset_shift()
-
-                while button.value() == 0:
-                    time.sleep_ms(10)
+        utime.sleep_ms(20)
 
 
-# ==========================
-# Loop Principal
-# ==========================
-
-while True:
-
-    lux = read_lux()
-
-    detect_piece(lux)
-
-    detect_microstop()
-
-    handle_button()
-
-    time.sleep_ms(20)
+main()
