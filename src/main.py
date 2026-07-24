@@ -1,92 +1,110 @@
-import machine
-import time
+from machine import Pin, ADC
+import utime
 
-# ==========================================
-# CONFIGURAÇÃO DE HARDWARE
-# ==========================================
-pino_ldr = machine.ADC(machine.Pin(34))
-pino_ldr.atten(machine.ADC.ATTN_11DB)
+# ---------------------------------------------------------------------------
+# Configuracao de hardware
+# ---------------------------------------------------------------------------
+LDR_PIN = 34   # GPIO34 (ADC1_CH6) - conectado ao pino AO do sensor ldr1
+BTN_PIN = 4    # GPIO4 - conectado ao botao btn1
 
-pino_btn = machine.Pin(12, machine.Pin.IN, machine.Pin.PULL_UP)
+ldr = ADC(Pin(LDR_PIN))
+ldr.atten(ADC.ATTN_11DB)   # Permite ler a faixa completa 0 - 3.3V (0 - 4095)
 
-# ==========================================
-# CONSTANTES (Compatíveis com os cenários do Wokwi)
-# ==========================================
-LIMIAR_LIVRE = 600        # Acima de 600 lux = Esteira livre (Valor de teste: 800)
-LIMIAR_BLOQUEIO = 100     # Abaixo de 100 lux = Peça bloqueando (Valor de teste: 50)
-TEMPO_MICRO_PARADA = 5000 # 5 segundos para disparar micro-parada
-ATRASO_DEBOUNCE = 50      # Tempo de debounce em milissegundos
+btn = Pin(BTN_PIN, Pin.IN, Pin.PULL_UP)  # nivel baixo = botao pressionado
 
-# ==========================================
-# VARIÁVEIS DE ESTADO DO SISTEMA
-# ==========================================
-pecas_total = 0
-estado_bloqueado = False
-tempo_inicio_bloqueio = 0
+# ---------------------------------------------------------------------------
+# Parametros do sistema
+# ---------------------------------------------------------------------------
+# Limiares em "contagem bruta do ADC" (0-4095), calculados a partir dos
+# parametros padrao do componente wokwi-photoresistor-sensor (rl10=50k ohm,
+# gamma=0.7, resistor fixo de 10k em serie com o LDR, AO entre os dois):
+#   R(lux)   = rl10 * (lux/10) ^ (-gamma)
+#   Vout     = VCC * Rfixo / (R(lux) + Rfixo)
+# Com VCC=3.3V isso da aproximadamente:
+#   lux=800 (linha livre)   -> ADC ~ 3300
+#   lux=50  (peca passando) -> ADC ~ 1560
+# Os limiares abaixo ficam entre esses dois valores, com folga (histerese)
+# para evitar oscilacao por ruido perto da transicao.
+LUX_ALTO = 2500   # acima disso = linha livre (> 500 lux no enunciado)
+LUX_BAIXO = 2000  # abaixo disso = peca bloqueando o sensor (< 100 lux no enunciado)
+
+DEBOUNCE_MS = 50
+MICRO_PARADA_MS = 5000
+
+# ---------------------------------------------------------------------------
+# Estado do sistema
+# ---------------------------------------------------------------------------
+contador_pecas = 0
+linha_bloqueada = False
+inicio_bloqueio = 0
 alerta_emitido = False
 
-estado_btn_anterior = 1
-tempo_ultimo_debounce = 0
+btn_estado_anterior = 1
+btn_ultima_mudanca = utime.ticks_ms()
+btn_estavel = 1
 
-def inicializar_sistema():
-    """Função de setup executada ao ligar o dispositivo."""
-    print("Contador de Producao Inicializado")
+
+def ler_botao():
+    """Debounce nao-bloqueante. Retorna o novo estado estavel (0 ou 1)
+    somente no instante em que ele muda, ou None caso contrario."""
+    global btn_estado_anterior, btn_ultima_mudanca, btn_estavel
+
+    leitura = btn.value()
+    agora = utime.ticks_ms()
+
+    if leitura != btn_estado_anterior:
+        btn_ultima_mudanca = agora
+        btn_estado_anterior = leitura
+
+    if utime.ticks_diff(agora, btn_ultima_mudanca) > DEBOUNCE_MS:
+        if leitura != btn_estavel:
+            btn_estavel = leitura
+            return btn_estavel
+
+    return None
+
 
 def resetar_turno():
-    """Zera contadores e reinicia estados."""
-    global pecas_total, estado_bloqueado, alerta_emitido
-    pecas_total = 0
-    estado_bloqueado = False
+    global contador_pecas, linha_bloqueada, alerta_emitido
+    contador_pecas = 0
+    linha_bloqueada = False
     alerta_emitido = False
     print("Turno resetado com sucesso. Contadores zerados.")
 
-def executar_loop():
-    """Loop principal rodando como Máquina de Estados não-bloqueante."""
-    global pecas_total, estado_bloqueado, tempo_inicio_bloqueio, alerta_emitido
-    global estado_btn_anterior, tempo_ultimo_debounce
+
+def main():
+    global contador_pecas, linha_bloqueada, inicio_bloqueio, alerta_emitido
+
+    print("Contador de Producao Inicializado")
 
     while True:
-        agora = time.ticks_ms()
-        leitura_ldr = pino_ldr.read()
-        leitura_btn = pino_btn.value()
+        valor_ldr = ldr.read()
+        agora = utime.ticks_ms()
 
-        # --------------------------------------------------
-        # 1. Lógica do Sensor Óptico (LDR) e Contagem (Cenário 1)
-        # --------------------------------------------------
-        if leitura_ldr < LIMIAR_BLOQUEIO and not estado_bloqueado:
-            estado_bloqueado = True
-            tempo_inicio_bloqueio = agora
+        # --- Deteccao de peca: incrementa somente na borda de subida ---
+        # (linha livre -> bloqueada -> livre = uma peca completa passou)
+        if not linha_bloqueada and valor_ldr < LUX_BAIXO:
+            linha_bloqueada = True
+            inicio_bloqueio = agora
             alerta_emitido = False
 
-        elif leitura_ldr > LIMIAR_LIVRE and estado_bloqueado:
-            estado_bloqueado = False
-            pecas_total += 1
-            print(f"Peca detectada! Total: {pecas_total}")
+        elif linha_bloqueada and valor_ldr > LUX_ALTO:
+            linha_bloqueada = False
+            contador_pecas += 1
+            print("Peca detectada! Total: {}".format(contador_pecas))
 
-        # --------------------------------------------------
-        # 2. Lógica de Detecção de Micro-paradas (Cenário 2)
-        # --------------------------------------------------
-        if estado_bloqueado and not alerta_emitido:
-            if time.ticks_diff(agora, tempo_inicio_bloqueio) >= TEMPO_MICRO_PARADA:
+        # --- Deteccao de micro-parada (temporizador nao-bloqueante) ---
+        if linha_bloqueada and not alerta_emitido:
+            if utime.ticks_diff(agora, inicio_bloqueio) > MICRO_PARADA_MS:
                 print("Alerta: Micro-parada detectada!")
                 alerta_emitido = True
 
-        # --------------------------------------------------
-        # 3. Lógica do Botão de Reset (Cenário 3)
-        # --------------------------------------------------
-        if leitura_btn != estado_btn_anterior:
-            tempo_ultimo_debounce = agora
+        # --- Botao de reset (com debounce) ---
+        novo_estado = ler_botao()
+        if novo_estado == 0:
+            resetar_turno()
 
-        if time.ticks_diff(agora, tempo_ultimo_debounce) > ATRASO_DEBOUNCE:
-            if leitura_btn == 0 and estado_btn_anterior == 1:
-                resetar_turno()
-                estado_btn_anterior = 0
-        
-        if leitura_btn == 1:
-             estado_btn_anterior = 1
+        utime.sleep_ms(20)
 
-        time.sleep_ms(10)
 
-if __name__ == "__main__":
-    inicializar_sistema()
-    executar_loop()
+main()
