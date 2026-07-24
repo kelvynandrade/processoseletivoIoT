@@ -27,10 +27,10 @@
   ],
   "connections": [
     ["esp:3V3", "ldr1:VCC", "red", []],
-    ["esp:GND", "ldr1:GND", "black", []],
+    ["esp:GND.1", "ldr1:GND", "black", []],
     ["ldr1:AO", "esp:D34", "green", []],
 
-    ["esp:GND", "btn1:1.l", "black", []],
+    ["esp:GND.1", "ldr1:GND", "black", []],
     ["btn1:2.l", "esp:D4", "yellow", []]
   ],
   "dependencies": {}
