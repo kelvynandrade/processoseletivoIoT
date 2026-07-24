@@ -10,7 +10,7 @@
 
 Este projeto implementa um sistema de monitoramento de linha de produção utilizando um sensor óptico simulado. O objetivo do firmware é detectar e contabilizar a passagem de peças através da interrupção de um feixe de luz (borda de descida e subida), calcular eventuais micro-paradas (gargalos operacionais) e permitir o reset manual do turno pelo operador, tudo isso operando em tempo real e sem a necessidade de um CLP industrial. 
 
----
+--- 
 
 ## Arquitetura do Sistema Embarcado
 
