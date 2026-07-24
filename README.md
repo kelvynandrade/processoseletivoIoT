@@ -12,7 +12,7 @@ Este projeto implementa um sistema de monitoramento de linha de produção utili
 
 --- 
 
-## Arquitetura do Sistema Embarcado
+## Arquitetura do Sistema Embarcado 
 
 O sistema foi estruturado em Python (MicroPython) utilizando o conceito de uma Máquina de Estados Finita (FSM) dentro de um loop infinito principal (`main.py`). A arquitetura lógica flui da seguinte maneira:
 
