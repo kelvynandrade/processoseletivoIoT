@@ -1,7 +1,4 @@
 [wokwi]
 version = 1
 firmware = "flasher_args.json"
-elf = "firmware.elf"
-# Garante que o Wokwi inclua a pasta src onde está o seu main.py
-firmwareFiles = ["src/main.py"]
 rfc2217ServerPort = 4000
