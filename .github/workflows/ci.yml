@@ -44,19 +44,18 @@ jobs:
     - name: Build Docker image
       run: docker build -t esp32-builder -f Dockerfile .
 
-    - name: Run container and generate firmware
+    - name: Run container and generate fs.bin
       run: |
         docker run --name esp32-fs-builder esp32-builder /bin/bash
+        
+        docker cp esp32-fs-builder:/fs.bin .
 
-        docker cp esp32-fs-builder:/firmware_lfs.bin .
-
-    # Salva o firmware mesclado (MicroPython + filesystem) gerado para que
-    # o próximo Job possa usá-lo
+    # Salva o arquivo fs.bin gerado para que o próximo Job possa usá-lo
     - name: Upload Build Artifact
       uses: actions/upload-artifact@v4
       with:
         name: esp32-firmware-binary
-        path: firmware_lfs.bin
+        path: fs.bin
         retention-days: 1
 
   run_tests:
@@ -71,7 +70,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # Baixa o firmware_lfs.bin gerado lá no JOB 2 para a raiz do projeto atual
+    # Baixa o fs.bin gerado lá no JOB 2 para a raiz do projeto atual
     - name: Download Build Artifact
       uses: actions/download-artifact@v4
       with:
@@ -83,14 +82,3 @@ jobs:
       with:
         token: ${{ secrets.WOKWI_CLI_TOKEN }}
         scenario: 'scenarios/${{ needs.detect_project.outputs.project_folder }}/${{ matrix.test_type }}.yaml'
-        serial_log_file: 'serial-${{ matrix.test_type }}.log'
-
-    # Roda mesmo se o passo acima falhar (é justamente quando mais
-    # precisamos ver o que aconteceu na serial)
-    - name: Upload serial log
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: serial-log-${{ matrix.test_type }}
-        path: serial-${{ matrix.test_type }}.log
-        retention-days: 3

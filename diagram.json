@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "author": "Kelvyn Andrade",
+  "author": "kelvyn andrade",
   "editor": "wokwi",
   "parts": [
     {
-      "type": "wokwi-esp32-devkit-v1",
+      "type": "board-esp32-devkit-c-v4",
       "id": "esp",
       "top": 0,
       "left": 0,
-      "attrs": {}
+      "attrs": { "env": "micropython-20231227-v1.22.0" }
     },
     {
       "type": "wokwi-photoresistor-sensor",
@@ -26,12 +26,15 @@
     }
   ],
   "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+
     ["esp:3V3", "ldr1:VCC", "red", []],
     ["esp:GND.1", "ldr1:GND", "black", []],
-    ["ldr1:AO", "esp:D34", "green", []],
+    ["ldr1:AO", "esp:34", "green", []],
 
-    ["esp:GND.1", "ldr1:GND", "black", []],
-    ["btn1:2.l", "esp:D4", "yellow", []]
+    ["esp:GND.2", "btn1:1.l", "black", []],
+    ["btn1:2.l", "esp:4", "yellow", []]
   ],
   "dependencies": {}
 }
