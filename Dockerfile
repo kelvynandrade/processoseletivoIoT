@@ -33,7 +33,8 @@ RUN curl -L -o /micropython.bin \
 #    de boot do ESP32) e o filesystem no offset 0x200000 (onde a particao
 #    "vfs" do build ESP32_GENERIC comeca).
 # ---------------------------------------------------------------------------
-RUN pip install esptool && \
+RUN apt-get update && apt-get install -y python3-pip && \
+  pip3 install esptool && \
   esptool --chip esp32 merge_bin -o /firmware_lfs.bin \
   --flash_mode dio --flash_size 4MB \
   0x1000 /micropython.bin \
