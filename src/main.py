@@ -17,16 +17,16 @@ btn = Pin(BTN_PIN, Pin.IN, Pin.PULL_UP)  # nivel baixo = botao pressionado
 # ---------------------------------------------------------------------------
 # Limiares em "contagem bruta do ADC" (0-4095), calculados a partir dos
 # parametros padrao do componente wokwi-photoresistor-sensor (rl10=50k ohm,
-# gamma=0.7, resistor fixo de 10k em serie com o LDR, AO entre os dois):
-#   R(lux)   = rl10 * (lux/10) ^ (-gamma)
-#   Vout     = VCC * Rfixo / (R(lux) + Rfixo)
-# Com VCC=3.3V isso da aproximadamente:
-#   lux=800 (linha livre)   -> ADC ~ 3300
-#   lux=50  (peca passando) -> ADC ~ 1560
+# gamma=0.7, resistor fixo de 10k em serie com o LDR, AO entre os dois).
+# IMPORTANTE: nesse sensor a polaridade e invertida em relacao ao que se
+# imaginaria - luz forte da uma leitura BAIXA no ADC, e escuro da uma
+# leitura ALTA:
+#   lux=800 (linha livre, bem iluminada) -> ADC ~ 1070
+#   lux=50  (peca bloqueando a luz)      -> ADC ~ 2910
 # Os limiares abaixo ficam entre esses dois valores, com folga (histerese)
 # para evitar oscilacao por ruido perto da transicao.
-LUX_ALTO = 2500   # acima disso = linha livre (> 500 lux no enunciado)
-LUX_BAIXO = 2000  # abaixo disso = peca bloqueando o sensor (< 100 lux no enunciado)
+LUX_LIVRE_ABAIXO = 1500      # abaixo disso = linha livre (> 500 lux no enunciado)
+LUX_BLOQUEADO_ACIMA = 2400   # acima disso = peca bloqueando o sensor (< 100 lux no enunciado)
 
 DEBOUNCE_MS = 50
 MICRO_PARADA_MS = 5000
@@ -83,12 +83,12 @@ def main():
 
         # --- Deteccao de peca: incrementa somente na borda de subida ---
         # (linha livre -> bloqueada -> livre = uma peca completa passou)
-        if not linha_bloqueada and valor_ldr < LUX_BAIXO:
+        if not linha_bloqueada and valor_ldr > LUX_BLOQUEADO_ACIMA:
             linha_bloqueada = True
             inicio_bloqueio = agora
             alerta_emitido = False
 
-        elif linha_bloqueada and valor_ldr > LUX_ALTO:
+        elif linha_bloqueada and valor_ldr < LUX_LIVRE_ABAIXO:
             linha_bloqueada = False
             contador_pecas += 1
             print("Peca detectada! Total: {}".format(contador_pecas))
